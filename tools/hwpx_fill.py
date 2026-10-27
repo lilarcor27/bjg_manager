@@ -184,8 +184,10 @@ class Hwpx:
         sz = tbl.find(_q("sz"))
         sz.set("height", str(max(0, int(sz.get("height")) - height)))
 
-    def set_cell_image(self, tbl, col, row, png_path, comment=None):
-        """Replace a cell's content with a PNG scaled to the cell's inner width."""
+    def set_cell_image(self, tbl, col, row, png_path, comment=None, max_height=None):
+        """Replace a cell's content with a PNG scaled to the cell's inner width.
+
+        max_height (HWPUNIT) shrinks a tall image so the cell does not grow."""
         data = open(png_path, "rb").read()
         px_w, px_h = _png_size(data)
         tc = self.cell(tbl, col, row)
@@ -193,14 +195,16 @@ class Hwpx:
         inner = int(tc.find(_q("cellSz")).get("width")) - int(margin.get("left")) - int(margin.get("right"))
         ow, oh = px_w * HWPUNIT_PER_PX, px_h * HWPUNIT_PER_PX
         w = min(inner, ow)
+        if max_height:
+            w = min(w, int(ow * max_height / oh))
         h = round(oh * w / ow)
         used_ids = {int(x) for x in re.findall(r'\bid="(\d+)"', etree.tostring(self.root).decode()) if len(x) < 12}
         pid = random.randint(10**9, 2 * 10**9)
         while pid in used_ids:
             pid += 1
         zs = [int(z) for z in self.root.xpath("//@zOrder")]
-        n = len(self._existing_bins()) + len(self.new_bins) + 1
-        ref = "image%d" % n
+        reuse = [r for r, _, blob in self.new_bins if blob == data]
+        ref = reuse[0] if reuse else "image%d" % (len(self._existing_bins()) + len(self.new_bins) + 1)
         pic = etree.fromstring(PIC.replace("\n", "").format(
             hp=HP, hc=HC, id=pid, z=max(zs, default=0) + 1, inst=pid - 1000, ow=ow, oh=oh, w=w, h=h,
             cx=w // 2, cy=h // 2, sx="%.6f" % (w / ow), sy="%.6f" % (h / oh), ref=ref))
@@ -212,12 +216,34 @@ class Hwpx:
             run.remove(child)
         run.append(pic)
         etree.SubElement(run, _q("t"))
-        self.new_bins.append((ref, "BinData/%s.png" % ref, data))
+        if not reuse:
+            self.new_bins.append((ref, "BinData/%s.png" % ref, data))
         return ref
 
     def _existing_bins(self):
         with zipfile.ZipFile(self.path) as z:
             return [n for n in z.namelist() if n.startswith("BinData/")]
+
+    def set_lines(self, old, lines):
+        """Replace a body paragraph whose text is `old` with one paragraph per line,
+        e.g. the '1-4-1 (평가지표-일련번호)' line under '▣ 세부 증빙자료'."""
+        for t in self.root.iter(_q("t")):
+            if t.text and t.text.strip() == old:
+                p = t.getparent().getparent()
+                indent = t.text[: len(t.text) - len(t.text.lstrip())]
+                prev = p
+                for i, line in enumerate(lines):
+                    q = p if i == 0 else copy.deepcopy(p)
+                    for tt in q.iter(_q("t")):
+                        tt.text = ""
+                    next(q.iter(_q("t"))).text = indent + line
+                    self._drop_lineseg_para(q)
+                    if i:
+                        q.set("id", "0")
+                        prev.addnext(q)
+                    prev = q
+                return
+        raise KeyError("paragraph %r not found" % old)
 
     def replace_text(self, old, new, count=1):
         done = 0
