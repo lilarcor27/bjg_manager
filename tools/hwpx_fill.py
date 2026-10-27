@@ -14,6 +14,9 @@ accounts for merged cells. Multi-line text is split on "\n" into separate
 paragraphs that copy the cell's first paragraph style.
 """
 import copy
+import datetime
+import glob
+import os
 import random
 import re
 import struct
@@ -45,6 +48,20 @@ PIC = """<hp:pic xmlns:hp="{hp}" xmlns:hc="{hc}" id="{id}" zOrder="{z}" numberin
 <hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0"
  vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/>
 <hp:outMargin left="0" right="0" top="0" bottom="0"/><hp:shapeComment>그림입니다.</hp:shapeComment></hp:pic>"""
+
+
+def stamped(base, ext=".hwpx"):
+    """'docs/x' -> 'docs/x 261027 1733.hwpx' (Korea time, yymmdd hhmm)."""
+    now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
+    return "%s %s%s" % (base, now.strftime("%y%m%d %H%M"), ext)
+
+
+def latest(base, ext=".hwpx"):
+    """Newest file saved with stamped(base); the stamp sorts by time."""
+    found = sorted(glob.glob(glob.escape(base) + " [0-9][0-9][0-9][0-9][0-9][0-9] [0-9][0-9][0-9][0-9]" + ext))
+    if not found:
+        raise FileNotFoundError(base + " yymmdd hhmm" + ext)
+    return found[-1]
 
 
 def _png_size(data):

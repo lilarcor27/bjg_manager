@@ -3,7 +3,7 @@
     python3 tools/fill_2026_comprehensive.py
 
 Reads the blank form `docs/1. 종합분야 실적서.hwpx` and writes
-`docs/작성본/1. 종합분야 실적서(옥천군).hwpx`. Table numbers (T[n]) are the
+`docs/작성본/1. 종합분야 실적서(옥천군) yymmdd hhmm.hwpx`. Table numbers (T[n]) are the
 order of tables in that blank form. Anything not yet backed by 2026
 evidence is marked 【작성 필요】 or 【확인 필요】 instead of guessed.
 """
@@ -11,10 +11,10 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from hwpx_fill import Hwpx  # noqa: E402
+from hwpx_fill import Hwpx, stamped  # noqa: E402
 
 SRC = "docs/1. 종합분야 실적서.hwpx"
-OUT = "docs/작성본/1. 종합분야 실적서(옥천군).hwpx"
+OUT = stamped("docs/작성본/1. 종합분야 실적서(옥천군)")
 TODO = "【작성 필요】"
 CHECK = "【확인 필요】"
 

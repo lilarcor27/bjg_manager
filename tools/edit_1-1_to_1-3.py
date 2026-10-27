@@ -1,18 +1,21 @@
 """Complete indicators 1-1 and 1-3 (and tidy 1-2, 3-2) in the working report.
 
-    python3 tools/edit_1-1_to_1-3.py
+    python3 tools/edit_1-1_to_1-3.py [input.hwpx]
 
-Edits `docs/작성본/1. 종합분야 실적서(옥천군).hwpx` in place, on top of the
-version the county saved from Hangul. Table numbers (T[n]) follow the form.
+Applied once, on top of the version the county saved from Hangul (commit
+b10f2e1). Reads the given file, or the newest
+`docs/작성본/1. 종합분야 실적서(옥천군) yymmdd hhmm.hwpx`, and saves a new
+file stamped with the current Korea time. Table numbers (T[n]) follow the form.
 """
 import copy
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from hwpx_fill import Hwpx, _q  # noqa: E402
+from hwpx_fill import Hwpx, _q, latest, stamped  # noqa: E402
 
-DOC = "docs/작성본/1. 종합분야 실적서(옥천군).hwpx"
+BASE = "docs/작성본/1. 종합분야 실적서(옥천군)"
+DOC = sys.argv[1] if len(sys.argv) > 1 else latest(BASE)
 IMG = "docs/작성본/이미지/"
 NEED = "【자료 필요】"
 
@@ -95,6 +98,6 @@ for c, v in enumerate([
 d.delete_row(T[156], 5)
 d.delete_row(T[156], 4)
 
-d.save(DOC + ".tmp")
-os.replace(DOC + ".tmp", DOC)
-print("saved", DOC)
+out = stamped(BASE)
+d.save(out)
+print("saved", out)
