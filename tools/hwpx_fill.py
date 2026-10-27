@@ -89,6 +89,31 @@ class Hwpx:
             sub.append(p)
         return tc
 
+    def append_row(self, tbl, src_row):
+        """Copy a plain row (no merged cells) to the end of the table."""
+        rows = tbl.findall(_q("tr"))
+        src = None
+        for tr in rows:
+            addrs = [int(tc.find(_q("cellAddr")).get("rowAddr")) for tc in tr.findall(_q("tc"))]
+            if addrs and addrs[0] == src_row:
+                src = tr
+        for tc in self._cells(tbl):
+            span = tc.find(_q("cellSpan"))
+            top = int(tc.find(_q("cellAddr")).get("rowAddr"))
+            if top <= src_row < top + int(span.get("rowSpan")) and span.get("rowSpan") != "1":
+                raise ValueError("row %d is part of a merged cell" % src_row)
+        new_row = int(tbl.get("rowCnt"))
+        tr = copy.deepcopy(src)
+        height = 0
+        for tc in tr.findall(_q("tc")):
+            tc.find(_q("cellAddr")).set("rowAddr", str(new_row))
+            height = max(height, int(tc.find(_q("cellSz")).get("height")))
+        rows[-1].addnext(tr)
+        tbl.set("rowCnt", str(new_row + 1))
+        sz = tbl.find(_q("sz"))
+        sz.set("height", str(int(sz.get("height")) + height))
+        return new_row
+
     def replace_text(self, old, new, count=1):
         done = 0
         for t in self.root.iter(_q("t")):
