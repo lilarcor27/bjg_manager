@@ -28,6 +28,16 @@ DIR = "docs/작성본/홈페이지 게시/"
 TEMPLATE = "tools/templates/홈페이지 게시 서식(② 담당자 편집본).hwpx"  # the county's ②, kept as-is
 POST2 = DIR + "② 2026년 참여예산주민위원회 구성 및 운영 현황.hwpx"
 BUDGET_2026 = "docs/자료/예산 산출근거/2026 본예산 세출 산출근거(주민제안사업 노란색 표시).xlsx"
+BUDGET_2027 = "docs/자료/예산 산출근거/2027 본예산(안) 주민참여예산 사업(청산면 제외).xlsx"
+EUP = ["옥천읍", "동이면", "안남면", "안내면", "청성면", "청산면", "이원면", "군서면", "군북면"]
+GENERIC = {"일반수용비", "일반용역비", "운영수당", "임차료", "주민참여숙원사업"}
+# Given separately by the county on 2026-10-27 (not in the 2027 workbook).
+CHEONGSAN_2027 = [("지역회의형", "지전리 마을안길정비공사(L=100m)", 30000), ("지역회의형", "신매리 농로확포장공사(L=100m)", 30000),
+                  ("지역회의형", "덕곡리 마을안길정비공사(L=200m)", 30000), ("지역회의형", "장위리 도로정비공사(L=350m)", 35000),
+                  ("지역회의형", "한곡리 도로정비공사(L=350m)", 35000), ("지역회의형", "덕지리 농로확포장공사(L=80m)", 35000),
+                  ("지역회의형", "하예곡리 농로정비공사(L=140m)", 25000), ("지역회의형", "삼방리 농로및배수로정비공사(L=70m)", 25000),
+                  ("지역회의형", "법화리 농로및배수로정비공사(L=100m)", 25000), ("주민자치회형", "청산 장터 야외무대 설치", 45000)]
+CITIZEN_2027 = [("군민참여형", "-", "청년 AI ZONE", "성장정책과", 15000)]
 SECTION = "Contents/section0.xml"
 HP = "http://www.hancom.co.kr/hwpml/2011/paragraph"
 CENTER, LEFT = "20", "0"  # paraPrIDRef the template uses in cells
@@ -223,7 +233,70 @@ def post6():
     t.save(DIR + "⑥ 2027년도 주민참여예산 사업 심사 과정.hwpx")
 
 
+def projects_2027():
+    """2027 projects selected in 2026: the county's 2027 draft-budget export
+    (level 1 ◎ / level 2 ○ lines), plus 청산면 and the citizen-type project."""
+    import openpyxl
+
+    ws = openpyxl.load_workbook(BUDGET_2027, data_only=True)["Sheet0"]
+    head = [c.value for c in ws[1]]
+    i_dept, i_biz = head.index("부서명"), head.index("세부사업명")
+    i_lvl, i_name, i_amt = head.index("조정레벨"), head.index("조정산출근거"), head.index("경정조정액")
+    rows = [r for r in ws.iter_rows(min_row=3, values_only=True) if r[0] == "2027"]
+    groups = {}
+    for r in rows:
+        groups.setdefault((r[i_dept], r[i_biz]), []).append((r[i_lvl], r[i_name].strip(), r[i_amt]))
+    found = []
+    for (dept, biz), lines in groups.items():
+        typ = "지역회의형" if "숙원" in biz else "주민자치회형"
+        for k, (lvl, name, amt) in enumerate(lines):
+            if lvl != "1":
+                continue
+            kids = []
+            for lvl2, name2, amt2 in lines[k + 1:]:
+                if lvl2 == "1":
+                    break
+                kids.append((name2.lstrip("○").strip(), amt2))
+            head_name = name.lstrip("◎").strip()
+            picks = kids if kids and head_name in GENERIC else [(head_name, amt)]
+            for nm, am in picks:
+                eup = next((e for e in EUP if e in dept or f"({e})" in nm), "")
+                found.append({"typ": typ, "eup": eup, "name": nm, "dept": dept, "amt": am})
+    found += [{"typ": t, "eup": "청산면", "name": n, "dept": "청산면", "amt": a} for t, n, a in CHEONGSAN_2027]
+    found += [{"typ": t, "eup": e, "name": n, "dept": d, "amt": a} for t, e, n, d, a in CITIZEN_2027]
+    order = {"지역회의형": 0, "주민자치회형": 1, "군민참여형": 2}
+    found.sort(key=lambda x: (order[x["typ"]], EUP.index(x["eup"]) if x["eup"] in EUP else 9, x["dept"] != "행정과"))
+    return found
+
+
 def post7():
+    """⑦ 2027 selection results: projects chosen through this year's process."""
+    items = projects_2027()
+    total = sum(e["amt"] for e in items)
+    by_type = {}
+    for e in items:
+        by_type.setdefault(e["typ"], [0, 0])
+        by_type[e["typ"]][0] += 1
+        by_type[e["typ"]][1] += e["amt"]
+    labels = {"지역회의형": "지역회의형(주민참여숙원사업)", "주민자치회형": "주민자치회형(주민자치회 참여예산)",
+              "군민참여형": "군민참여형"}
+    t = Template(TEMPLATE)
+    t.title("2027년도 주민참여예산 공모사업 선정 결과")
+    t.heading_("1. 선정 개요", first=True)
+    t.bullet_(f"2026년 주민참여예산 공모·심사를 거쳐 선정된 2027년도 사업: {len(items)}건, {total:,}천원")
+    for typ, (n, amt) in by_type.items():
+        t._clone(t.bullet, f"      - {labels[typ]} {n}건, {amt:,}천원")
+    t.bullet_("2027년도 본예산(안) 기준이며, 군의회 심의 결과에 따라 변경될 수 있습니다.")
+    t.blank_()
+    t.heading_("2. 사업별 내역")
+    rows = [["합계", "", "", "", "", f"{total:,}"]]
+    rows += [[i, e["typ"], e["eup"] or "-", e["name"], e["dept"], f"{e['amt']:,}"] for i, e in enumerate(items, 1)]
+    t.table([("연번", 7, "c"), ("유형", 14, "c"), ("읍면", 10, "c"), ("사업명", 44, "l"),
+             ("소관부서", 12, "c"), ("예산액(천원)", 13, "c")], rows, repeat_header=True)
+    t.save(DIR + "⑦ 2027년도 주민참여예산 공모사업 선정 결과.hwpx")
+
+
+def post7_2026():
     items, _issues, _total = load(BUDGET_2026, 2026)
     total = sum(e["amt"] for e in items)
     local = sum(e["amt"] for e in items if e["typ"] == "지역회의형")
