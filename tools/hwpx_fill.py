@@ -86,6 +86,7 @@ class Hwpx:
         self.decl = raw[: raw.index(b"?>") + 2] if raw.startswith(b"<?xml") else b""
         self.root = etree.fromstring(raw)
         self.new_bins = []  # (item id, zip path, bytes)
+        self.swapped = {}  # item id -> PNG bytes that replace the original bin
 
     # ---- lookup -------------------------------------------------------
     def tables(self):
@@ -220,6 +221,30 @@ class Hwpx:
             self.new_bins.append((ref, "BinData/%s.png" % ref, data))
         return ref
 
+    def swap_image(self, ref, png_path):
+        """Replace the picture data of bin item `ref` (e.g. a pasted WMF chart) with
+        a PNG, keeping each picture's displayed size; make the PNG the same shape."""
+        data = open(png_path, "rb").read()
+        px_w, px_h = _png_size(data)
+        ow, oh = px_w * HWPUNIT_PER_PX, px_h * HWPUNIT_PER_PX
+        pics = [pic for pic in self.root.iter(_q("pic"))
+                if pic.find(".//{%s}img" % HC).get("binaryItemIDRef") == ref]
+        if not pics:
+            raise KeyError("no picture uses %s" % ref)
+        for pic in pics:
+            cur = pic.find(_q("curSz"))
+            w, h = int(cur.get("width")), int(cur.get("height"))
+            pic.find(_q("orgSz")).attrib.update({"width": str(ow), "height": str(oh)})
+            sca = pic.find(".//{%s}scaMatrix" % HC)
+            sca.set("e1", "%.6f" % (w / ow))
+            sca.set("e5", "%.6f" % (h / oh))
+            rect = pic.find(_q("imgRect"))
+            for name, (x, y) in zip(("pt0", "pt1", "pt2", "pt3"), ((0, 0), (ow, 0), (ow, oh), (0, oh))):
+                rect.find("{%s}%s" % (HC, name)).attrib.update({"x": str(x), "y": str(y)})
+            pic.find(_q("imgClip")).attrib.update({"left": "0", "right": str(ow), "top": "0", "bottom": str(oh)})
+            pic.find(_q("imgDim")).attrib.update({"dimwidth": str(ow), "dimheight": str(oh)})
+        self.swapped[ref] = data
+
     def _existing_bins(self):
         with zipfile.ZipFile(self.path) as z:
             return [n for n in z.namelist() if n.startswith("BinData/")]
@@ -289,12 +314,29 @@ class Hwpx:
         data = (self.decl or b'<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>') + body
         with zipfile.ZipFile(self.path) as src, zipfile.ZipFile(out, "w") as dst:
             for info in src.infolist():
+                stem = os.path.splitext(os.path.basename(info.filename))[0]
+                if info.filename.startswith("BinData/") and stem in self.swapped:
+                    continue
                 payload = data if info.filename == SECTION else src.read(info.filename)
                 if info.filename == MANIFEST and self.new_bins:
                     payload = self._manifest_with_bins(payload)
+                if info.filename == MANIFEST and self.swapped:
+                    payload = self._manifest_with_swaps(payload)
                 dst.writestr(info, payload, compress_type=info.compress_type)
+            for ref, blob in self.swapped.items():
+                dst.writestr(zipfile.ZipInfo("BinData/%s.png" % ref, (1980, 1, 1, 0, 0, 0)), blob,
+                             compress_type=zipfile.ZIP_STORED)
             for _, name, blob in self.new_bins:
                 dst.writestr(zipfile.ZipInfo(name, (1980, 1, 1, 0, 0, 0)), blob, compress_type=zipfile.ZIP_STORED)
+
+    def _manifest_with_swaps(self, payload):
+        text = payload.decode("utf-8")
+        for ref in self.swapped:
+            text, n = re.subn(r'(<opf:item id="%s" href=")BinData/%s\.\w+(" media-type=")[^"]+"' % (ref, ref),
+                              r'\1BinData/%s.png\2image/png"' % ref, text)
+            if n != 1:
+                raise ValueError("manifest item %s not found" % ref)
+        return text.encode("utf-8")
 
     def _manifest_with_bins(self, payload):
         text = payload.decode("utf-8")
